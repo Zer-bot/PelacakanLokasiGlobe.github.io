@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Pelacakan Lokasi Pengguna dengan Globe Animasi</title>
+<link 
+  rel="stylesheet" 
+  href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" 
+  integrity="sha256-sA+4vx0FVDMV+R9wkXDC9K3Hb46N2MT9t6XT4fZ5C+8=" 
+  crossorigin=""
+/>
+<style>
+  /* Reset & base */
+  * {
+    box-sizing: border-box;
+  }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    overflow: hidden;
+    user-select: none;
+  }
+  body {
+    background: #000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    height: 100vh;
+    max-height: 600px;
+    max-width: 350px;
+    margin: auto;
+    position: relative;
+  }
+  canvas#globe-canvas {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    width: 100vw;
+    height: 100vh;
+    max-width: 350px;
+    max-height: 600px;
+    transform: translate(-50%, -50%);
+    z-index: 0;
+    user-select: none;
+    background: #000;
+  }
+  #app {
+    position: relative;
+    z-index: 10;
+    width: 100%;
+    max-width: 350px;
+    height: 100%;
+    max-height: 600px;
+    background: rgba(0,0,0,0.7);
+    border-radius: 20px;
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.8);
+    padding: 1.5rem 1rem 1.2rem 1rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  h1 {
+    color: #fff;
+    text-shadow: 0 0 8px #00e5ff;
+    font-weight: 900;
+    font-size: 1.7rem;
+    margin: 0 0 1rem 0;
+    user-select: text;
+    text-align: center;
+  }
+  button#btn {
+    width: 100%;
+    max-width: 320px;
+    padding: 14px 0;
+    background: #00e5ff;
+    font-size: 1.15rem;
+    font-weight: 700;
+    border: none;
+    border-radius: 40px;
+    cursor: pointer;
+    color: #000;
+    box-shadow: 0 8px 20px #00e5ffaa;
+    transition: background-color 0.3s ease;
+    user-select: none;
+  }
+  button#btn:hover,
+  button#btn:focus {
+    background: #00b8cc;
+    outline: none;
+    box-shadow: 0 10px 28px #00b8cccc;
+  }
+  #status {
+    margin-top: 1rem;
+    color: #00e5ff;
+    font-weight: 600;
+    font-size: 1.05rem;
+    min-height: 24px;
+    text-align: center;
+    user-select: text;
+    text-shadow: 0 0 6px #00e5ffaa;
+  }
+  #coords {
+    margin-top: 0.6rem;
+    background: rgba(0, 229, 255, 0.1);
+    border-radius: 16px;
+    padding: 12px 16px;
+    font-family: monospace;
+    font-weight: 700;
+    font-size: 1.05rem;
+    text-align: center;
+    max-width: 320px;
+    overflow-wrap: break-word;
+    user-select: text;
+    box-shadow: inset 0 0 10px #00e5ff88;
+    color: #00e5ffdd;
+  }
+  #map {
+    margin-top: 1.3rem;
+    width: 100%;
+    max-width: 350px;
+    height: 300px;
+    border-radius: 24px;
+    box-shadow: 0 12px 36px rgba(0, 229, 255, 0.7);
+    user-select: none;
+    z-index: 10;
+  }
+  footer {
+    margin-top: auto;
+    font-size: 0.85rem;
+    color: rgba(0,229,255,0.7);
+    text-align: center;
+    user-select: text;
+    padding-bottom: 6px;
+  }
+  @media (max-height: 500px) {
+    #map {
+      height: 220px;
+    }
+    h1 {
+      font-size: 1.3rem;
+    }
+    button#btn {
+      font-size: 1rem;
+      padding: 10px 0;
+    }
+  }
+</style>
+</head>
+<body>
+  <canvas id="globe-canvas" aria-hidden="true"></canvas>
+  <div id="app" role="main">
+    <h1>Pelacakan Lokasi Pengguna</h1>
+    <button id="btn" aria-label="Ambil Lokasi Saya">Ambil Lokasi Saya</button>
+    <div id="status" aria-live="polite" role="status"></div>
+    <div id="coords" aria-label="Koordinat lokasi pengguna"></div>
+    <div id="map" aria-label="Peta lokasi pengguna"></div>
+    <footer>© 2024 Pelacakan Lokasi - Mobile & Desktop Ready</footer>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-pM7N1fzRw26PZbWxWNX6CX3MhF9JKRAz+l1Lf3fTJTc="
+    crossorigin=""></script>
+
+  <script>
+    // Setup Leaflet map
+    const mapDiv = document.getElementById('map');
+    const map = L.map(mapDiv).setView([0,0], 2);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(map);
+    let userMarker = null;
+    let accuracyCircle = null;
+
+    // Elements
+    const btn = document.getElementById('btn');
+    const statusEl = document.getElementById('status');
+    const coordsEl = document.getElementById('coords');
+
+    // Update location on map and text
+    function updateLocation(position) {
+      const lat = position.coords.latitude;
+      const lon = position.coords.longitude;
+      const accuracy = position.coords.accuracy;
+
+      statusEl.textContent = 'Lokasi ditemukan.';
+      coordsEl.textContent = `Latitude: ${lat.toFixed(6)}, Longitude: ${lon.toFixed(6)} (Akurasi ±${Math.round(accuracy)} m)`;
+
+      map.setView([lat, lon], 15);
+
+      if(userMarker) {
+        userMarker.setLatLng([lat, lon]);
+      } else {
+        userMarker = L.marker([lat, lon]).addTo(map);
+      }
+
+      if(accuracyCircle) {
+        accuracyCircle.setLatLng([lat, lon]);
+        accuracyCircle.setRadius(accuracy);
+      } else {
+        accuracyCircle = L.circle([lat, lon], {
+          radius: accuracy,
+          color: '#00e5ff',
+          fillColor: '#00e5ff33',
+          fillOpacity: 0.25
+        }).addTo(map);
+      }
+    }
+
+    function showError(error) {
+      switch(error.code){
+        case error.PERMISSION_DENIED:
+          statusEl.textContent = 'Izin lokasi ditolak oleh pengguna.';
+          break;
+        case error.POSITION_UNAVAILABLE:
+          statusEl.textContent = 'Informasi lokasi tidak tersedia.';
+          break;
+        case error.TIMEOUT:
+          statusEl.textContent = 'Permintaan lokasi habis waktu.';
+          break;
+        default:
+          statusEl.textContent = 'Terjadi kesalahan saat mengambil lokasi.';
+      }
+      coordsEl.textContent = '';
+      map.setView([0, 0], 2);
+      if(userMarker) {
+        map.removeLayer(userMarker);
+        userMarker = null;
+      }
+      if(accuracyCircle) {
+        map.removeLayer(accuracyCircle);
+        accuracyCircle = null;
+      }
+    }
+
+    btn.addEventListener('click', () => {
+      if(!navigator.geolocation) {
+        statusEl.textContent = 'Geolocation tidak didukung di browser ini.';
+        return;
+      }
+      statusEl.textContent = 'Mengambil lokasi...';
+      coordsEl.textContent = '';
+      navigator.geolocation.getCurrentPosition(updateLocation, showError, {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0
+      });
+    });
+
+    // ==== Globe animation ====
+
+    const canvas = document.getElementById('globe-canvas');
+    const ctx = canvas.getContext('2d');
+
+    // Resize canvas to fit container
+    function resizeCanvas() {
+      // Use max 350x600 but scale canvas for retina
+      const dpr = window.devicePixelRatio || 1;
+      canvas.style.width = '350px';
+      canvas.style.height = '600px';
+      canvas.width = 350 * dpr;
+      canvas.height = 600 * dpr;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.scale(dpr, dpr);
+    }
+
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    // Globe parameters
+    const globeRadius = 150;
+    const globeCenterX = 175; // Half width 350 / 2
+    const globeCenterY = 300; // Half height 600 / 2
+
+    let rotation = 0; // rotation angle in radians
+
+    // Preload earth map image from public domain
+    const earthTexture = new Image();
+    earthTexture.src = 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/83/Equirectangular_projection_SW.jpg/1024px-Equirectangular_projection_SW.jpg';
+    // Image is 1024x512
+
+    // Draw sphere using simple shading and texture mapping
+    function drawGlobe() {
+      ctx.clearRect(0, 0, 350, 600);
+
+      // Draw background radial gradient behind globe
+      let grad = ctx.createRadialGradient(globeCenterX, globeCenterY, globeRadius/3, globeCenterX, globeCenterY, globeRadius);
+      grad.addColorStop(0, 'rgba(0, 230, 255, 0.4)');
+      grad.addColorStop(1, 'rgba(0, 0, 0, 0.8)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(globeCenterX, globeCenterY, globeRadius+10, 0, Math.PI*2);
+      ctx.fill();
+
+      // Draw globe border
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(0, 230, 255, 0.8)';
+      ctx.beginPath();
+      ctx.arc(globeCenterX, globeCenterY, globeRadius, 0, Math.PI*2);
+      ctx.stroke();
+
+      // If earthTexture not loaded, draw simple shaded circle
+      if(!earthTexture.complete) {
+        // Basic shaded sphere
+        let gradient = ctx.createRadialGradient(globeCenterX-40, globeCenterY-40, 20, globeCenterX, globeCenterY, globeRadius);
+        gradient.addColorStop(0, '#00e5ff');
+        gradient.addColorStop(1, '#00333a');
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(globeCenterX, globeCenterY, globeRadius, 0, Math.PI*2);
+        ctx.fill();
+
+        // Draw loading text
+        ctx.fillStyle = '#00e5ffaa';
+        ctx.font = '16px Verdana';
+        ctx.textAlign = 'center';
+        ctx.fillText('Loading globe...', globeCenterX, globeCenterY);
+        return;
+      }
+
+      // Draw globe surface by slicing vertical texture columns spaced evenly and mapping to circle
+
+      let segments = 100;
+      let segmentAngle = (Math.PI*2) / segments;
+      let radius = globeRadius;
+
+      for(let i=0; i<segments; i++) {
+        let angleStart = i*segmentAngle + rotation;
+        let angleEnd = angleStart + segmentAngle;
+
+        // Calculate x on globe circle for start and end
+        let xStart = globeCenterX + Math.sin(angleStart)*radius;
+        let yStart = globeCenterY - Math.cos(angleStart)*radius;
+
+        let xEnd = globeCenterX + Math.sin(angleEnd)*radius;
+        let yEnd = globeCenterY - Math.cos(angleEnd)*radius;
+
+        // Texture coordinate u for segment
+        let u = i / segments;
+
+        // Calculate brightness for shading (simulate light from left side)
+        let brightness = 0.5 + 0.5 * Math.cos(angleStart - Math.PI/2);
+
+        // Compute source rectangle from texture
+        let sx = u * earthTexture.width;
+        let sy = 0;
+        let sw = earthTexture.width / segments;
+        let sh = earthTexture.height;
+
+        // Destination polygon (triangle fan) for this segment
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(globeCenterX, globeCenterY);
+        ctx.lineTo(xStart, yStart);
+        ctx.lineTo(xEnd, yEnd);
+        ctx.closePath();
+
+        // Clip to segment shape
+        ctx.clip();
+
+        // Draw the segment from texture - map full height, horizontal slice at u
+        // Slight vertical squeeze to simulate sphere curvature
+        ctx.drawImage(
+          earthTexture,
+          sx, sy, sw, sh,
+          globeCenterX - radius, globeCenterY - radius*0.9, radius*2, radius*1.8
+        );
+
+        // Overlay shading
+        ctx.fillStyle = `rgba(0,0,0,${(1 - brightness)*0.6})`;
+        ctx.fillRect(globeCenterX - radius, globeCenterY - radius, radius*2, radius*2);
+        ctx.restore();
+      }
+
+      // Draw specular highlight
+      const highlightX = globeCenterX + Math.sin(rotation + Math.PI/4)*radius*0.6;
+      const highlightY = globeCenterY - Math.cos(rotation + Math.PI/4)*radius*0.6;
+      let specGrad = ctx.createRadialGradient(highlightX, highlightY, 5, highlightX, highlightY, 50);
+      specGrad.addColorStop(0, 'rgba(255,255,255,0.6)');
+      specGrad.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = specGrad;
+      ctx.beginPath();
+      ctx.arc(highlightX, highlightY, 50, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    function animate() {
+      rotation += 0.005; // rotation speed
+      if(rotation > Math.PI*2) rotation -= Math.PI*2;
+      drawGlobe();
+      requestAnimationFrame(animate);
+    }
+
+    earthTexture.onload = () => {
+      animate();
+    };
+  </script>
+</body>
+</html>
